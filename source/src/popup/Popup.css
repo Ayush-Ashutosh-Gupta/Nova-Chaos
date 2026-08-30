@@ -1,0 +1,107 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html {
+  width: 400px;
+}
+
+body {
+  width: 400px;
+  max-width: 400px;
+  min-height: 520px;
+  overflow-x: hidden;
+  margin: 0;
+  padding: 0;
+  font-family: 'Space Grotesk', system-ui, sans-serif;
+  background-color: #020617;
+}
+
+#root {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+/* Custom modern scrollbars */
+::-webkit-scrollbar {
+  width: 5px;
+}
+::-webkit-scrollbar-track {
+  background: #090d16;
+}
+::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+
+/* ============================================
+   HAVOC BUTTON — animated hazard styling
+   ============================================ */
+.havoc-btn {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  animation: havocPulse 2.2s ease-in-out infinite;
+}
+
+/* Pulse glow animation */
+@keyframes havocPulse {
+  0%, 100% {
+    box-shadow: 0 6px 25px rgba(239, 68, 68, 0.55), 0 0 18px rgba(249, 115, 22, 0.35), inset 0 0 8px rgba(255, 255, 255, 0.06);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 6px 32px rgba(239, 68, 68, 0.75), 0 0 28px rgba(249, 115, 22, 0.55), inset 0 0 12px rgba(255, 255, 255, 0.1);
+    transform: scale(1.015);
+  }
+}
+
+/* Sheen sweep across the button surface */
+.havoc-btn-sheen {
+  background: linear-gradient(
+    115deg,
+    transparent 20%,
+    rgba(255, 255, 255, 0.18) 38%,
+    rgba(255, 255, 255, 0.35) 50%,
+    rgba(255, 255, 255, 0.18) 62%,
+    transparent 80%
+  );
+  background-size: 250% 100%;
+  animation: havocSheen 2.8s linear infinite;
+}
+
+@keyframes havocSheen {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -150% 0;
+  }
+}
+
+/* Hover intensification */
+.havoc-btn:hover {
+  animation-duration: 1.4s;
+}
+
+.havoc-btn:hover .havoc-btn-sheen {
+  animation-duration: 1.6s;
+  background-size: 200% 100%;
+}
+
+/* Active press */
+.havoc-btn:active {
+  animation: none;
+  transform: scale(0.96);
+  box-shadow: 0 2px 10px rgba(239, 68, 68, 0.5), 0 0 14px rgba(249, 115, 22, 0.3);
+}

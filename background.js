@@ -1,0 +1,1 @@
+(()=>{chrome.runtime.onInstalled.addListener(e=>{e.reason==="install"&&console.log("[ChaosUI] Extension installed successfully.")});chrome.runtime.onMessage.addListener((e,n,s)=>(e.type==="PING"&&s({status:"alive"}),!0));})();

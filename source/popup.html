@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NovaChaos</title>
+  <link rel="stylesheet" href="popup.css">
+  <script>
+    (function() {
+      window.addEventListener('unhandledrejection', function(event) {
+        event.preventDefault();
+      });
+
+      window.addEventListener('error', function(event) {
+        if (event?.message && (event.message.includes('Cannot access contents') || event.message.includes('runtime.lastError'))) {
+          event.preventDefault();
+        }
+      });
+
+      if (typeof chrome !== 'undefined') {
+        const tabUrlCache = new Map();
+
+        const isRestrictedUrl = (url) => {
+          if (!url || typeof url !== 'string') return true;
+          const lower = url.toLowerCase();
+          return lower.startsWith('chrome://') || 
+                 lower.startsWith('chrome-extension://') || 
+                 lower.startsWith('edge://') || 
+                 lower.startsWith('about:') || 
+                 lower.startsWith('devtools://') ||
+                 lower.startsWith('view-source:') ||
+                 lower.startsWith('data:') ||
+                 lower.startsWith('chrome-search://') ||
+                 lower.startsWith('chrome-untrusted://') ||
+                 lower.startsWith('https://chrome.google.com/webstore') ||
+                 lower.startsWith('https://chromewebstore.google.com');
+        };
+
+        const isTabRestricted = async (tabId) => {
+          if (typeof tabId !== 'number') return true;
+          if (tabUrlCache.has(tabId)) {
+            return isRestrictedUrl(tabUrlCache.get(tabId));
+          }
+          if (chrome.tabs && typeof chrome.tabs.get === 'function') {
+            try {
+              const tab = await new Promise((resolve) => {
+                try {
+                  chrome.tabs.get(tabId, (t) => {
+                    const _ = chrome.runtime?.lastError;
+                    resolve(t);
+                  });
+                } catch (e) {
+                  resolve(null);
+                }
+              });
+              if (tab) {
+                const url = tab.url || tab.pendingUrl;
+                if (url) {
+                  tabUrlCache.set(tabId, url);
+                  return isRestrictedUrl(url);
+                }
+              }
+            } catch (e) {
+              return true;
+            }
+          }
+          return isRestrictedUrl(window.location?.href || '');
+        };
+
+        if (chrome.tabs) {
+          if (chrome.tabs.onUpdated) {
+            chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+              if (tab?.url) tabUrlCache.set(tabId, tab.url);
+              else if (changeInfo?.url) tabUrlCache.set(tabId, changeInfo.url);
+            });
+          }
+          if (chrome.tabs.onRemoved) {
+            chrome.tabs.onRemoved.addListener((tabId) => {
+              tabUrlCache.delete(tabId);
+            });
+          }
+
+          if (typeof chrome.tabs.query === 'function') {
+            const origQuery = chrome.tabs.query.bind(chrome.tabs);
+            chrome.tabs.query = function(...args) {
+              let cb = typeof args[args.length - 1] === 'function' ? args.pop() : null;
+              return new Promise((resolve) => {
+                let resolved = false;
+                const safeResolve = (val) => {
+                  if (resolved) return;
+                  resolved = true;
+                  const _ = chrome.runtime?.lastError;
+                  const res = Array.isArray(val) ? val : [];
+                  res.forEach(t => {
+                    if (t && typeof t.id === 'number') {
+                      const u = t.url || t.pendingUrl;
+                      if (u) {
+                        tabUrlCache.set(t.id, u);
+                      } else if (isRestrictedUrl(window.location.href)) {
+                        tabUrlCache.set(t.id, window.location.href);
+                      }
+                    }
+                  });
+                  if (cb) { try { cb(res); } catch (e) {} }
+                  resolve(res);
+                };
+
+                try {
+                  const ret = origQuery(...args, (res) => {
+                    safeResolve(res);
+                  });
+                  if (ret && typeof ret.then === 'function') {
+                    ret.then(
+                      (res) => safeResolve(res),
+                      () => safeResolve([])
+                    ).catch(() => safeResolve([]));
+                  }
+                } catch (err) {
+                  safeResolve([]);
+                }
+              });
+            };
+          }
+
+          if (typeof chrome.tabs.get === 'function') {
+            const origGet = chrome.tabs.get.bind(chrome.tabs);
+            chrome.tabs.get = function(...args) {
+              let cb = typeof args[args.length - 1] === 'function' ? args.pop() : null;
+              return new Promise((resolve) => {
+                let resolved = false;
+                const safeResolve = (val) => {
+                  if (resolved) return;
+                  resolved = true;
+                  const _ = chrome.runtime?.lastError;
+                  if (val && typeof val.id === 'number' && (val.url || val.pendingUrl)) {
+                    tabUrlCache.set(val.id, val.url || val.pendingUrl);
+                  }
+                  if (cb) { try { cb(val); } catch (e) {} }
+                  resolve(val);
+                };
+
+                try {
+                  const ret = origGet(...args, (res) => {
+                    safeResolve(res);
+                  });
+                  if (ret && typeof ret.then === 'function') {
+                    ret.then(
+                      (res) => safeResolve(res),
+                      () => safeResolve(undefined)
+                    ).catch(() => safeResolve(undefined));
+                  }
+                } catch (err) {
+                  safeResolve(undefined);
+                }
+              });
+            };
+          }
+
+          if (typeof chrome.tabs.sendMessage === 'function') {
+            const origSend = chrome.tabs.sendMessage.bind(chrome.tabs);
+            chrome.tabs.sendMessage = function(...args) {
+              let cb = typeof args[args.length - 1] === 'function' ? args.pop() : null;
+              const tabId = typeof args[0] === 'number' ? args[0] : null;
+              return new Promise((resolve) => {
+                let resolved = false;
+                const safeResolve = (val) => {
+                  if (resolved) return;
+                  resolved = true;
+                  const _ = chrome.runtime?.lastError;
+                  if (cb) { try { cb(val); } catch (e) {} }
+                  resolve(val);
+                };
+
+                const run = async () => {
+                  if (tabId == null || (await isTabRestricted(tabId))) {
+                    safeResolve(undefined);
+                    return;
+                  }
+                  try {
+                    const ret = origSend(...args, (res) => {
+                      safeResolve(res);
+                    });
+                    if (ret && typeof ret.then === 'function') {
+                      ret.then(
+                        (res) => safeResolve(res),
+                        () => safeResolve(undefined)
+                      ).catch(() => safeResolve(undefined));
+                    }
+                  } catch (err) {
+                    safeResolve(undefined);
+                  }
+                };
+                run();
+              });
+            };
+          }
+
+          ['executeScript', 'insertCSS', 'removeCSS'].forEach((method) => {
+            if (typeof chrome.tabs[method] === 'function') {
+              const orig = chrome.tabs[method].bind(chrome.tabs);
+              chrome.tabs[method] = function(...args) {
+                let cb = typeof args[args.length - 1] === 'function' ? args.pop() : null;
+                const tabId = typeof args[0] === 'number' ? args[0] : null;
+                return new Promise((resolve) => {
+                  let resolved = false;
+                  const safeResolve = (val) => {
+                    if (resolved) return;
+                    resolved = true;
+                    const _ = chrome.runtime?.lastError;
+                    const res = val || [];
+                    if (cb) { try { cb(res); } catch (e) {} }
+                    resolve(res);
+                  };
+
+                  const run = async () => {
+                    if (tabId == null || (await isTabRestricted(tabId))) {
+                      safeResolve([]);
+                      return;
+                    }
+                    try {
+                      const ret = orig(...args, (res) => {
+                        safeResolve(res);
+                      });
+                      if (ret && typeof ret.then === 'function') {
+                        ret.then(
+                          (res) => safeResolve(res),
+                          () => safeResolve([])
+                        ).catch(() => safeResolve([]));
+                      }
+                    } catch (err) {
+                      safeResolve([]);
+                    }
+                  };
+                  run();
+                });
+              };
+            }
+          });
+        }
+
+        if (chrome.scripting) {
+          if (typeof chrome.scripting.executeScript === 'function') {
+            const origExec = chrome.scripting.executeScript.bind(chrome.scripting);
+            chrome.scripting.executeScript = function(...args) {
+              let cb = typeof args[args.length - 1] === 'function' ? args.pop() : null;
+              const injection = args[0];
+              const tabId = injection?.target?.tabId;
+              return new Promise((resolve) => {
+                let resolved = false;
+                const safeResolve = (val) => {
+                  if (resolved) return;
+                  resolved = true;
+                  const _ = chrome.runtime?.lastError;
+                  const res = val || [];
+                  if (cb) { try { cb(res); } catch (e) {} }
+                  resolve(res);
+                };
+
+                const run = async () => {
+                  if (tabId == null || (await isTabRestricted(tabId))) {
+                    safeResolve([]);
+                    return;
+                  }
+                  try {
+                    const ret = origExec(injection, (res) => {
+                      safeResolve(res);
+                    });
+                    if (ret && typeof ret.then === 'function') {
+                      ret.then(
+                        (res) => safeResolve(res),
+                        () => safeResolve([])
+                      ).catch(() => safeResolve([]));
+                    }
+                  } catch (err) {
+                    safeResolve([]);
+                  }
+                };
+                run();
+              });
+            };
+          }
+
+          ['insertCSS', 'removeCSS'].forEach((method) => {
+            if (typeof chrome.scripting[method] === 'function') {
+              const orig = chrome.scripting[method].bind(chrome.scripting);
+              chrome.scripting[method] = function(...args) {
+                let cb = typeof args[args.length - 1] === 'function' ? args.pop() : null;
+                const targetObj = args[0];
+                const tabId = targetObj?.target?.tabId;
+                return new Promise((resolve) => {
+                  let resolved = false;
+                  const safeResolve = (val) => {
+                    if (resolved) return;
+                    resolved = true;
+                    const _ = chrome.runtime?.lastError;
+                    if (cb) { try { cb(val); } catch (e) {} }
+                    resolve(val);
+                  };
+
+                  const run = async () => {
+                    if (tabId == null || (await isTabRestricted(tabId))) {
+                      safeResolve();
+                      return;
+                    }
+                    try {
+                      const ret = orig(targetObj, (res) => {
+                        safeResolve(res);
+                      });
+                      if (ret && typeof ret.then === 'function') {
+                        ret.then(
+                          (res) => safeResolve(res),
+                          () => safeResolve()
+                        ).catch(() => safeResolve());
+                      }
+                    } catch (err) {
+                      safeResolve();
+                    }
+                  };
+                  run();
+                });
+              };
+            }
+          });
+        }
+
+        if (chrome.runtime && typeof chrome.runtime.sendMessage === 'function') {
+          const origRuntimeSend = chrome.runtime.sendMessage.bind(chrome.runtime);
+          chrome.runtime.sendMessage = function(...args) {
+            let cb = typeof args[args.length - 1] === 'function' ? args.pop() : null;
+            return new Promise((resolve) => {
+              let resolved = false;
+              const safeResolve = (val) => {
+                if (resolved) return;
+                resolved = true;
+                const _ = chrome.runtime?.lastError;
+                if (cb) { try { cb(val); } catch (e) {} }
+                resolve(val);
+              };
+
+              try {
+                const ret = origRuntimeSend(...args, (res) => {
+                  safeResolve(res);
+                });
+                if (ret && typeof ret.then === 'function') {
+                  ret.then(
+                    (res) => safeResolve(res),
+                    () => safeResolve(undefined)
+                  ).catch(() => safeResolve(undefined));
+                }
+              } catch (err) {
+                safeResolve(undefined);
+              }
+            });
+          };
+        }
+      }
+    })();
+  </script>
+</head>
+<body class="bg-slate-950 text-slate-100">
+  <div id="root"></div>
+  <script src="popup.js"></script>
+</body>
+</html>
